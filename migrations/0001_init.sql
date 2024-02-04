@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS domains (
+    uid INTEGER PRIMARY KEY NOT NULL,
+    name TEXT UNIQUE NOT NULL,
+	length INTEGER NOT NULL,
+	prohibited_characters TEXT NOT NULL,
+	version TEXT NOT NULL
+)
