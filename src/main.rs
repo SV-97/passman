@@ -1,13 +1,20 @@
+// DATABASE_URL="" cargo sqlx prepare
 use eyre::{eyre, Report, Result};
 use inquire;
 use inquire::ui;
 use pwdgen_core::PassSpec;
+use rand::Rng;
 use secrecy::SecretString;
-use sqlx::{Connection, SqliteConnection};
+use sqlx::{
+    migrate::{Migrate, Migrator},
+    sqlite::SqliteConnectOptions,
+    ConnectOptions, SqliteConnection,
+};
 
-use std::fmt;
+use std::{collections::HashSet, fmt, str::FromStr, time::Duration};
 
-// type OwnedPassSpec = PassSpec<String, String>;
+static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
+const DATABASE_URL: &'static str = "sqlite://passman.db";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum PwVersion {
@@ -57,57 +64,6 @@ async fn retrieve_current_list(conn: &mut SqliteConnection) -> Result<Vec<DbPass
         .collect::<Result<Vec<_>>>()
 }
 
-async fn retrieve_by_name(conn: &mut SqliteConnection, name: &str) -> Result<DbPassSpec> {
-    let record = sqlx::query!("SELECT * from domains where name=?", name)
-        .fetch_one(conn)
-        .await?;
-    Ok(DbPassSpec {
-        uid: record.uid,
-        domain: record.name,
-        length: usize::try_from(record.length).map_err(|e| eyre!(e))?,
-        prohibited_chars: record.prohibited_characters,
-        version: record.version.try_into()?,
-    })
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    enum MainMenuChoice {
-        Query,
-        CreateNew,
-        Exit,
-    }
-    impl fmt::Display for MainMenuChoice {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str(match self {
-                Self::Query => "Query entries",
-                Self::CreateNew => "Create a new entry",
-                Self::Exit => "Exit",
-            })
-        }
-    }
-
-    let mut conn = SqliteConnection::connect("sqlite://totally_not_my_passwords.db").await?;
-
-    let main_menu_options = vec![
-        MainMenuChoice::Query,
-        MainMenuChoice::CreateNew,
-        MainMenuChoice::Exit,
-    ];
-    let main_select = inquire::Select::new("Select submenu:", main_menu_options.clone());
-    loop {
-        let ans = main_select.clone().prompt();
-        match ans {
-            Ok(MainMenuChoice::Exit) => break,
-            Ok(MainMenuChoice::Query) => query(&mut conn).await?,
-            Ok(MainMenuChoice::CreateNew) => insert_new(&mut conn).await?,
-            Err(e) => println!("{}", e),
-        }
-    }
-    Ok(())
-}
-
 async fn insert_new(conn: &mut SqliteConnection) -> Result<()> {
     let domain = inquire::Text::new("What's the name of the domain you want to add?").prompt()?;
     let length = inquire::Text::new("How long do you want the password to be?").prompt()?;
@@ -126,6 +82,7 @@ async fn insert_new(conn: &mut SqliteConnection) -> Result<()> {
     )
     .execute(conn)
     .await?;
+    println!("Successfully added {}.", domain);
     Ok(())
 }
 
@@ -146,21 +103,25 @@ async fn query(conn: &mut SqliteConnection) -> Result<()> {
     }
 
     let current = retrieve_current_list(conn).await?;
-    let selected_domain = inquire::Select::new("Select domain:", current).prompt()?;
+    if current.is_empty() {
+        println!("There are no stored domains yet. You can only start querying once you inserted at least one.");
+    } else {
+        let selected_domain = inquire::Select::new("Select domain:", current).prompt()?;
 
-    let choices = vec![
-        QueryChoice::GetPass,
-        QueryChoice::Update,
-        QueryChoice::Delete,
-    ];
-    let query_action = inquire::Select::new("What do you want to do?", choices).prompt();
-    match query_action? {
-        QueryChoice::GetPass => {
-            let pass = get_pass(selected_domain)?;
-            println!("Generated password: >>{}<<", pass);
+        let choices = vec![
+            QueryChoice::GetPass,
+            QueryChoice::Update,
+            QueryChoice::Delete,
+        ];
+        let query_action = inquire::Select::new("What do you want to do?", choices).prompt();
+        match query_action? {
+            QueryChoice::GetPass => {
+                let pass = get_pass(selected_domain)?;
+                println!("Generated password: >>{}<<", pass);
+            }
+            QueryChoice::Delete => deletion_dialog(conn, selected_domain).await?,
+            QueryChoice::Update => update_entry(conn, selected_domain).await?,
         }
-        QueryChoice::Delete => deletion_dialog(conn, selected_domain).await?,
-        QueryChoice::Update => update_entry(conn, selected_domain).await?,
     }
     Ok(())
 }
@@ -236,5 +197,105 @@ async fn deletion_dialog(conn: &mut SqliteConnection, spec: DbPassSpec) -> Resul
         }
     }
     println!("Not deleting domain");
+    Ok(())
+}
+
+async fn prepare_db() -> Result<SqliteConnection> {
+    let mut conn = SqliteConnectOptions::from_str(DATABASE_URL)?
+        .create_if_missing(true)
+        .optimize_on_close(true, None)
+        .connect()
+        .await?;
+
+    conn.ensure_migrations_table().await?;
+    // find out which migrations have already been applied and apply
+    // all those that haven't been applied yet
+    let applied_migrations = conn
+        .list_applied_migrations()
+        .await?
+        .into_iter()
+        .map(|m| m.checksum)
+        .collect::<HashSet<_>>();
+    for migration in MIGRATOR
+        .migrations
+        .iter()
+        .skip_while(|m| applied_migrations.contains(&m.checksum))
+    {
+        conn.apply(migration).await?;
+    }
+    Ok(conn)
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    enum MainMenuChoice {
+        Query,
+        CreateNew,
+        Exit,
+        DropDb,
+    }
+    impl fmt::Display for MainMenuChoice {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(match self {
+                Self::Query => "Query entries",
+                Self::CreateNew => "Create a new entry",
+                Self::DropDb => "Drop database",
+                Self::Exit => "Exit",
+            })
+        }
+    }
+
+    // let mut conn = SqliteConnection::connect("sqlite://totally_not_my_passwords.db").await?;
+    let mut conn = prepare_db().await?;
+
+    let main_menu_options = vec![
+        MainMenuChoice::Query,
+        MainMenuChoice::CreateNew,
+        MainMenuChoice::DropDb,
+        MainMenuChoice::Exit,
+    ];
+    let main_select = inquire::Select::new("Select submenu:", main_menu_options.clone());
+    loop {
+        let ans = main_select.clone().prompt();
+        match ans {
+            Ok(MainMenuChoice::Exit) => break,
+            Ok(MainMenuChoice::Query) => query(&mut conn).await?,
+            Ok(MainMenuChoice::CreateNew) => insert_new(&mut conn).await?,
+            Ok(MainMenuChoice::DropDb) => {
+                let confirmed_drop =
+                    inquire::Confirm::new("Do you really want to drop (delete) the full database?")
+                        .prompt()?;
+                if confirmed_drop {
+                    let mut rng = rand::thread_rng();
+                    let s: [u8; 2] = rng.gen();
+                    let answer = inquire::Text::new(
+                &format!("To confirm that you *REALLY* want to delete the complete database please compute {} + {} = ",
+                            s[0],
+                            s[1]
+                        )
+                    )
+                    .with_placeholder("...")
+                    .prompt()?;
+                    let correct_answer = (s[0] as u16).checked_add(s[1] as u16).ok_or(eyre!(
+                        "Internal error; this should not have happened. Please try again"
+                    ))?;
+                    if answer.parse::<u16>()? == correct_answer {
+                        use sqlx::migrate::MigrateDatabase;
+                        let current = retrieve_current_list(&mut conn).await?;
+                        println!("Correct. Dropping DB in 5s...");
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        sqlx::Sqlite::drop_database(DATABASE_URL).await?;
+                        println!("Dropped database. Printing final contents... ");
+                        println!("{:?}", current);
+                        return Ok(());
+                    } else {
+                        println!("Your answer is wrong. Not dropping database.")
+                    }
+                }
+            }
+            Err(e) => println!("{}", e),
+        }
+    }
     Ok(())
 }
