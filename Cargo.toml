@@ -11,6 +11,7 @@ anyhow = "1.0.79"
 eyre = "0.6.12"
 inquire = "0.6.2"
 pwdgen_core = { path = "pwdgen_core" }
+rand = "0.8.5"
 secrecy = { version = "0.8.0", features = ["alloc"] }
-sqlx = { version = "0.7.3", features = ["sqlite"] }
+sqlx = { version = "0.7.3", features = ["sqlite", "runtime-tokio", "macros"] }
 tokio = { version = "1.36.0", features = ["full"] }
