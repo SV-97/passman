@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                UPDATE domains\n                SET prohibited_characters = ?\n                WHERE uid = ?;\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "84c1d3f9f080ce54fc8a8dbbf34748dc2953435c214b23d5bb87a39dda0e9d5f"
+}

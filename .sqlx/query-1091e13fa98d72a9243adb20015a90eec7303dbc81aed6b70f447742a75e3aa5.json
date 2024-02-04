@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT * from domains",
+  "describe": {
+    "columns": [
+      {
+        "name": "uid",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "length",
+        "ordinal": 2,
+        "type_info": "Int64"
+      },
+      {
+        "name": "prohibited_characters",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "version",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1091e13fa98d72a9243adb20015a90eec7303dbc81aed6b70f447742a75e3aa5"
+}

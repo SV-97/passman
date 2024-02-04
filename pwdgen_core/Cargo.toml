@@ -1,0 +1,15 @@
+[package]
+name = "pwdgen_core"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+pbkdf2 = "0.12.2"
+sha2 = "0.10.8"
+rand = "0.8.5"
+pyrand = "0.1.1"
+const_format = "0.2.32"
+num = "0.4.1"
+secrecy = { version = "0.8.0", features = ["alloc"] }

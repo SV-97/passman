@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM domains WHERE uid = ?;",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "3c9ede26c5926939d3b83cfd2301a4c49624663d7e3790c25437840fa38ac63c"
+}
