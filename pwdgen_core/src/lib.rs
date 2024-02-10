@@ -181,7 +181,8 @@ mod tests {
             spec.gen_v0(
                 "just_another_salt",
                 &SecretString::new("Passwort".to_string())
-            ),
+            )
+            .expose_secret(),
             "7UmX{D?6X-+AaSt-ZN2mw8EqC",
         )
     }
