@@ -1,10 +1,10 @@
 // DATABASE_URL="" cargo sqlx prepare
 use eyre::{eyre, Report, Result};
-use inquire;
 use inquire::ui;
+use inquire::{self, InquireError};
 use pwdgen_core::PassSpec;
 use rand::Rng;
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use sqlx::{
     migrate::{Migrate, Migrator},
     sqlite::SqliteConnectOptions,
@@ -14,11 +14,12 @@ use sqlx::{
 use std::{collections::HashSet, fmt, str::FromStr, time::Duration};
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
-const DATABASE_URL: &'static str = "sqlite://passman.db";
+const DATABASE_URL: &str = "sqlite://passman.db";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum PwVersion {
     Zero,
+    Two,
 }
 
 impl TryFrom<String> for PwVersion {
@@ -26,9 +27,18 @@ impl TryFrom<String> for PwVersion {
     fn try_from(value: String) -> Result<Self, Self::Error> {
         match value.as_str() {
             "0" => Ok(Self::Zero),
-            // "1" => Ok(Self::One),
+            "v2" => Ok(Self::Two),
             v => Err(eyre!("Unknown version: {}", v)),
         }
+    }
+}
+
+impl fmt::Display for PwVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            PwVersion::Zero => "0",
+            PwVersion::Two => "v2",
+        })
     }
 }
 
@@ -64,21 +74,41 @@ async fn retrieve_current_list(conn: &mut SqliteConnection) -> Result<Vec<DbPass
         .collect::<Result<Vec<_>>>()
 }
 
+fn prompt_version_select() -> Result<PwVersion, InquireError> {
+    inquire::Select::new(
+        "Which password derivation version do you want to use? (version 2 is recommended)",
+        vec![PwVersion::Two, PwVersion::Zero],
+    )
+    .prompt()
+}
+
+fn prompt_pw_length() -> Result<u32, InquireError> {
+    inquire::CustomType::new("How long do you want the password to be?")
+        .with_default(25)
+        .prompt()
+}
+
 async fn insert_new(conn: &mut SqliteConnection) -> Result<()> {
     let domain = inquire::Text::new("What's the name of the domain you want to add?").prompt()?;
-    let length = inquire::Text::new("How long do you want the password to be?").prompt()?;
+    let length = prompt_pw_length()?;
+    let version = prompt_version_select()?;
     let prohibited_chars =
         inquire::Text::new("What characters (if any) should **not** be part of the password?")
+            .with_default(match version {
+                PwVersion::Two => "OIlL",
+                PwVersion::Zero => "",
+            })
             .prompt()?;
-    // we hardcode the version to 0 for now
+    let version_str = version.to_string();
     sqlx::query!(
         "
         INSERT INTO domains (name, length, prohibited_characters, version)
-        VALUES (?, ?, ?, '0');
+        VALUES (?, ?, ?, ?);
         ",
         domain,
         length,
         prohibited_chars,
+        version_str,
     )
     .execute(conn)
     .await?;
@@ -96,8 +126,8 @@ async fn query(conn: &mut SqliteConnection) -> Result<()> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.write_str(match self {
                 Self::GetPass => "Get password for domain",
-                Self::Update => "Update domain",
-                Self::Delete => "Delete entry",
+                Self::Update => "Update settings for domain",
+                Self::Delete => "Delete entry from database",
             })
         }
     }
@@ -117,7 +147,7 @@ async fn query(conn: &mut SqliteConnection) -> Result<()> {
         match query_action? {
             QueryChoice::GetPass => {
                 let pass = get_pass(selected_domain)?;
-                println!("Generated password: >>{}<<", pass);
+                println!("Generated password: >>{}<<\n", pass.expose_secret());
             }
             QueryChoice::Delete => deletion_dialog(conn, selected_domain).await?,
             QueryChoice::Update => update_entry(conn, selected_domain).await?,
@@ -126,7 +156,7 @@ async fn query(conn: &mut SqliteConnection) -> Result<()> {
     Ok(())
 }
 
-fn get_pass(spec: DbPassSpec) -> Result<String> {
+fn get_pass(spec: DbPassSpec) -> Result<SecretString> {
     let master_pw = SecretString::new(inquire::Password::new("Master password:").prompt()?);
     match spec.version {
         PwVersion::Zero => {
@@ -137,22 +167,41 @@ fn get_pass(spec: DbPassSpec) -> Result<String> {
             };
             Ok(spec.gen_v0("just_another_salt", &master_pw))
         }
+        PwVersion::Two => {
+            let spec = PassSpec {
+                domain: spec.domain,
+                length: spec.length,
+                prohibited_chars: spec.prohibited_chars,
+            };
+            const SALT: [u8; 16] = [
+                82, 67, 79, 175, 96, 126, 77, 82, 158, 82, 6, 10, 183, 123, 18, 236,
+            ];
+            Ok(spec.gen_v2(SALT, &master_pw, |_| true)?)
+        }
     }
 }
 
 async fn update_entry(conn: &mut SqliteConnection, spec: DbPassSpec) -> Result<()> {
     enum UpdateChoice {
         ModifyProhibitedChars,
+        UpdatePwVersion,
+        Length,
     }
     impl fmt::Display for UpdateChoice {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.write_str(match self {
                 Self::ModifyProhibitedChars => "Modify prohibited chars",
+                Self::UpdatePwVersion => "Modify password derivation version",
+                Self::Length => "Modify password length",
             })
         }
     }
 
-    let choices = vec![UpdateChoice::ModifyProhibitedChars];
+    let choices = vec![
+        UpdateChoice::ModifyProhibitedChars,
+        UpdateChoice::UpdatePwVersion,
+        UpdateChoice::Length,
+    ];
     let query_action = inquire::Select::new("What do you want to do?", choices).prompt();
     match query_action? {
         UpdateChoice::ModifyProhibitedChars => {
@@ -170,6 +219,37 @@ async fn update_entry(conn: &mut SqliteConnection, spec: DbPassSpec) -> Result<(
             )
             .execute(conn)
             .await?;
+            println!("Successfully updated prohibited characters");
+        }
+        UpdateChoice::UpdatePwVersion => {
+            let new = prompt_version_select()?.to_string();
+            sqlx::query!(
+                "
+                UPDATE domains
+                SET version = ?
+                WHERE uid = ?;
+                ",
+                new,
+                spec.uid,
+            )
+            .execute(conn)
+            .await?;
+            println!("Successfully updated password derivation version");
+        }
+        UpdateChoice::Length => {
+            let new = prompt_pw_length()?;
+            sqlx::query!(
+                "
+                UPDATE domains
+                SET length = ?
+                WHERE uid = ?;
+                ",
+                new,
+                spec.uid,
+            )
+            .execute(conn)
+            .await?;
+            println!("Successfully updated password derivation version");
         }
     }
     Ok(())

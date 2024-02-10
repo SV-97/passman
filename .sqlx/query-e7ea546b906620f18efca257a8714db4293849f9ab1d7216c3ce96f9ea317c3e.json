@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                UPDATE domains\n                SET version = ?\n                WHERE uid = ?;\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "e7ea546b906620f18efca257a8714db4293849f9ab1d7216c3ce96f9ea317c3e"
+}
