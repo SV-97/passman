@@ -8,6 +8,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.79"
+colored = "2.1.0"
 eyre = "0.6.12"
 inquire = "0.6.2"
 pwdgen_core = { path = "pwdgen_core" }

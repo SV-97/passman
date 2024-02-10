@@ -1,4 +1,5 @@
 // DATABASE_URL="" cargo sqlx prepare
+use colored::Colorize;
 use eyre::{eyre, Report, Result};
 use inquire::ui;
 use inquire::{self, InquireError};
@@ -85,6 +86,7 @@ fn prompt_version_select() -> Result<PwVersion, InquireError> {
 fn prompt_pw_length() -> Result<u32, InquireError> {
     inquire::CustomType::new("How long do you want the password to be?")
         .with_default(25)
+        .with_help_message("Enter an integer value. Please use a value no smaller than 12.")
         .prompt()
 }
 
@@ -147,7 +149,10 @@ async fn query(conn: &mut SqliteConnection) -> Result<()> {
         match query_action? {
             QueryChoice::GetPass => {
                 let pass = get_pass(selected_domain)?;
-                println!("Generated password: >>{}<<\n", pass.expose_secret());
+                println!(
+                    "Generated password (printed white on white): >>{}<<",
+                    pass.expose_secret().white().on_white()
+                );
             }
             QueryChoice::Delete => deletion_dialog(conn, selected_domain).await?,
             QueryChoice::Update => update_entry(conn, selected_domain).await?,
@@ -157,7 +162,11 @@ async fn query(conn: &mut SqliteConnection) -> Result<()> {
 }
 
 fn get_pass(spec: DbPassSpec) -> Result<SecretString> {
-    let master_pw = SecretString::new(inquire::Password::new("Master password:").prompt()?);
+    let master_pw = SecretString::new(
+        inquire::Password::new("Master password:")
+            .with_display_mode(inquire::PasswordDisplayMode::Hidden)
+            .prompt()?,
+    );
     match spec.version {
         PwVersion::Zero => {
             let spec = PassSpec {
@@ -219,7 +228,7 @@ async fn update_entry(conn: &mut SqliteConnection, spec: DbPassSpec) -> Result<(
             )
             .execute(conn)
             .await?;
-            println!("Successfully updated prohibited characters");
+            println!("Successfully updated prohibited characters.");
         }
         UpdateChoice::UpdatePwVersion => {
             let new = prompt_version_select()?.to_string();
@@ -234,7 +243,7 @@ async fn update_entry(conn: &mut SqliteConnection, spec: DbPassSpec) -> Result<(
             )
             .execute(conn)
             .await?;
-            println!("Successfully updated password derivation version");
+            println!("Successfully updated password derivation version.");
         }
         UpdateChoice::Length => {
             let new = prompt_pw_length()?;
@@ -249,7 +258,7 @@ async fn update_entry(conn: &mut SqliteConnection, spec: DbPassSpec) -> Result<(
             )
             .execute(conn)
             .await?;
-            println!("Successfully updated password derivation version");
+            println!("Successfully updated password length.");
         }
     }
     Ok(())
@@ -260,6 +269,7 @@ async fn deletion_dialog(conn: &mut SqliteConnection, spec: DbPassSpec) -> Resul
         "Do you really want to remove the entry for domain '{}'?",
         spec.domain
     ))
+    .with_default(false)
     .prompt()?;
     if confirmed_delete {
         let config = ui::RenderConfig::default()
@@ -345,6 +355,7 @@ async fn main() -> Result<()> {
             Ok(MainMenuChoice::DropDb) => {
                 let confirmed_drop =
                     inquire::Confirm::new("Do you really want to drop (delete) the full database?")
+                        .with_default(false)
                         .prompt()?;
                 if confirmed_drop {
                     let mut rng = rand::thread_rng();
@@ -376,6 +387,7 @@ async fn main() -> Result<()> {
             }
             Err(e) => println!("{}", e),
         }
+        println!("");
     }
     Ok(())
 }
