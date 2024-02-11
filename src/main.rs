@@ -213,6 +213,25 @@ async fn insert_new(conn: &mut SqliteConnection) -> Result<()> {
     let domain = unwrap_ret!(
         inquire::Text::new("What's the name of the domain you want to add?").prompt_skippable()?
     );
+    // check if the domain is already in the DB and if so report an error
+    let res = sqlx::query!(
+        "
+            SELECT COUNT(*) > 0 AS name_exists
+            FROM domains
+            WHERE name = ?;
+        ",
+        domain,
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    if res.name_exists != 0 {
+        println!(
+            "{}",
+            "This name is already taken. Please choose another one.".magenta()
+        );
+        return Ok(());
+    }
+
     let length = unwrap_ret!(prompt_pw_length().prompt_skippable()?);
     let version = unwrap_ret!(prompt_version_select().prompt_skippable()?);
     let prohibited_chars = unwrap_ret!(inquire::Text::new(

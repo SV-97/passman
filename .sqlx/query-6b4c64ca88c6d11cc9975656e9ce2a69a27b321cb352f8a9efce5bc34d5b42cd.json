@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT COUNT(*) > 0 AS name_exists\n            FROM domains\n            WHERE name = ?;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "name_exists",
+        "ordinal": 0,
+        "type_info": "Int"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6b4c64ca88c6d11cc9975656e9ce2a69a27b321cb352f8a9efce5bc34d5b42cd"
+}
