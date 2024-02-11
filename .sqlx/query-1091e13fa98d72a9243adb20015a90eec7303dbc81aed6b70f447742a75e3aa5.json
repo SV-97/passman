@@ -27,12 +27,36 @@
         "name": "version",
         "ordinal": 4,
         "type_info": "Text"
+      },
+      {
+        "name": "min_count_lowercase",
+        "ordinal": 5,
+        "type_info": "Int64"
+      },
+      {
+        "name": "min_count_uppercase",
+        "ordinal": 6,
+        "type_info": "Int64"
+      },
+      {
+        "name": "min_count_digit",
+        "ordinal": 7,
+        "type_info": "Int64"
+      },
+      {
+        "name": "min_count_symbol",
+        "ordinal": 8,
+        "type_info": "Int64"
       }
     ],
     "parameters": {
       "Right": 0
     },
     "nullable": [
+      false,
+      false,
+      false,
+      false,
       false,
       false,
       false,

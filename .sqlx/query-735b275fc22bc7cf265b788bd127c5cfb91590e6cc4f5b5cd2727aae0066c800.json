@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                UPDATE domains\n                SET min_count_lowercase = ?,\n                    min_count_uppercase = ?,\n                    min_count_digit = ?,\n                    min_count_symbol = ?\n                WHERE uid = ?;\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "735b275fc22bc7cf265b788bd127c5cfb91590e6cc4f5b5cd2727aae0066c800"
+}
