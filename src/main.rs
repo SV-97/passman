@@ -6,7 +6,7 @@ use inquire::{
     CustomType, InquireError,
 };
 use lazy_static::lazy_static;
-use pwdgen_core::PassSpec;
+use pwdgen_core::{PassSpec, V0_DEFAULT_ALPHABET, V2_DEFAULT_ALPHABET};
 use rand::Rng;
 use secrecy::{ExposeSecret, SecretString};
 use sqlx::{
@@ -309,6 +309,13 @@ async fn query(conn: &mut SqliteConnection) -> Result<()> {
     Ok(())
 }
 
+fn apply_prohibited_chars(alphabet: &str, prohibited_chars: &str) -> String {
+    alphabet
+        .chars()
+        .filter(|c| !prohibited_chars.contains(*c))
+        .collect()
+}
+
 fn get_pass(spec: DbPassSpec) -> Result<SecretString> {
     let master_pw = SecretString::new(
         inquire::Password::new("Master password:")
@@ -320,7 +327,7 @@ fn get_pass(spec: DbPassSpec) -> Result<SecretString> {
             let spec = PassSpec {
                 domain: spec.domain,
                 length: spec.length,
-                prohibited_chars: spec.prohibited_chars,
+                alphabet: apply_prohibited_chars(V0_DEFAULT_ALPHABET, &spec.prohibited_chars),
             };
             Ok(spec.gen_v0("just_another_salt", &master_pw))
         }
@@ -328,7 +335,7 @@ fn get_pass(spec: DbPassSpec) -> Result<SecretString> {
             let base_spec = PassSpec {
                 domain: spec.domain,
                 length: spec.length,
-                prohibited_chars: spec.prohibited_chars,
+                alphabet: apply_prohibited_chars(V2_DEFAULT_ALPHABET, &spec.prohibited_chars),
             };
             const SALT: [u8; 16] = [
                 82, 67, 79, 175, 96, 126, 77, 82, 158, 82, 6, 10, 183, 123, 18, 236,

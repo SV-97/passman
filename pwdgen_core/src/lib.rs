@@ -12,12 +12,16 @@ use std::{borrow::Borrow, fmt::Write};
 use thiserror::Error;
 
 const ASCII_LETTERS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+pub const V0_DEFAULT_ALPHABET: &str =
+    formatcp!("abcdefghijkmnopqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ123456789!,;.-_+-*()[]{{}}$%=?");
+pub const V2_DEFAULT_ALPHABET: &str = formatcp!("{ASCII_LETTERS}123456789!,;.-_+-*()[]{{}}$%=?");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PassSpec<T, S> {
     pub domain: T,
     pub length: usize,
-    pub prohibited_chars: S,
+    /// alphabet from which password characters will be chosen
+    pub alphabet: S, //  pub prohibited_chars: S,
 }
 
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,20 +47,13 @@ impl std::fmt::Display for ErrorV1 {
 
 impl<T: Borrow<str>, S: Borrow<str>> PassSpec<T, S> {
     pub fn gen_v0(&self, salt: &str, master_pw: &SecretString) -> SecretString {
-        const BASE_ALPHABET: &str = formatcp!("{ASCII_LETTERS}123456789!,;.-_+-*()[]{{}}$%=?");
         const N_ITERS: usize = 9600;
         let &PassSpec {
             ref domain,
             length,
-            ref prohibited_chars,
+            ref alphabet,
         } = self;
-
-        let prohibited_chars = format!("{}OIlL", prohibited_chars.borrow());
-        let alphabet: String = BASE_ALPHABET
-            .chars()
-            .filter(|c| !prohibited_chars.contains(*c))
-            .collect();
-        dbg!(alphabet.len());
+        let alphabet = alphabet.borrow();
 
         let rng = &mut PyMt19937::py_seed(format!("{salt}/archive")); // PyMt19937::py_seed(alphabet.clone());
         let presalt: String = alphabet.chars().choose(rng).take(50).collect();
@@ -107,13 +104,6 @@ impl<T: Borrow<str>, S: Borrow<str>> PassSpec<T, S> {
             hasher.update(salt);
             let user_hash = <[u8; DIGEST_SIZE]>::from(hasher.finalize());
 
-            // determine alphabet from which password characters will be chosen
-            const BASE_ALPHABET: &str = formatcp!("{ASCII_LETTERS}123456789!,;.-_+-*()[]{{}}$%=?");
-            let alphabet: String = BASE_ALPHABET
-                .chars()
-                .filter(|c| !self.prohibited_chars.borrow().contains(*c))
-                .collect();
-
             // set up argon2 instance
             let salt = SaltString::encode_b64(&salt).expect("Internal error: invalid salt");
             // seems to be a reasonable setting with a 25-character password generating in about 0.5-ish seconds
@@ -129,6 +119,7 @@ impl<T: Borrow<str>, S: Borrow<str>> PassSpec<T, S> {
             let mut generated_pw = String::with_capacity(self.length);
             // initialize argon2 password with the user-input based hash
             let mut curr_pw: [u8; DIGEST_SIZE] = user_hash;
+            let alphabet = self.alphabet.borrow();
             loop {
                 // we loop and generate passwords. Starting with the user input hash we generate single password
                 // characters one by one by iterating argon2, seeding 20-iteration chacha PRNGs with the argon2 output
@@ -155,12 +146,11 @@ impl<T: Borrow<str>, S: Borrow<str>> PassSpec<T, S> {
                 // if the generated password is fine we use it...
                 if password_statisfies_rules(&generated_pw) {
                     break Ok(SecretString::new(generated_pw));
-                } else {
-                    // ...otherwise we start over from scratch.
-                    // Note that the last character's argon2 digest of the current password is fed into
-                    // the argon2 instance for the next password's first character.
-                    generated_pw.clear()
                 }
+                // ...otherwise we start over from scratch.
+                // Note that the last character's argon2 digest of the current password is fed into
+                // the argon2 instance for the next password's first character.
+                generated_pw.clear()
             }
         }
     }
@@ -175,8 +165,9 @@ mod tests {
         let spec = PassSpec {
             domain: "Thomann",
             length: 25,
-            prohibited_chars: "",
+            alphabet: V0_DEFAULT_ALPHABET,
         };
+
         assert_eq!(
             spec.gen_v0(
                 "just_another_salt",
@@ -192,7 +183,7 @@ mod tests {
         let spec = PassSpec {
             domain: "Thomann",
             length: 25,
-            prohibited_chars: "OIlL",
+            alphabet: V0_DEFAULT_ALPHABET, // we want to have the V0 prohibited chars for this test
         };
         let salt = [
             82, 67, 79, 175, 96, 126, 77, 82, 158, 82, 6, 10, 183, 123, 18, 236,
@@ -205,6 +196,23 @@ mod tests {
                 .is_uppercase())
                 .map(|s| s.expose_secret().clone()),
             Ok("V66(3X9)B_{%9S;4K$yGWtvhy".to_owned()),
+        )
+    }
+
+    #[test]
+    fn pin() {
+        let spec = PassSpec {
+            domain: "Thomann",
+            length: 4,
+            alphabet: "0123456789",
+        };
+        let salt = [
+            82, 67, 79, 175, 96, 126, 77, 82, 158, 82, 6, 10, 183, 123, 18, 236,
+        ];
+        assert_eq!(
+            spec.gen_v2(salt, &SecretString::new("Passwort".to_string()), |_pw| true)
+                .map(|s| s.expose_secret().clone()),
+            Ok("3559".to_owned()),
         )
     }
 }
