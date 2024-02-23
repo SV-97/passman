@@ -47,6 +47,11 @@
         "name": "min_count_symbol",
         "ordinal": 8,
         "type_info": "Int64"
+      },
+      {
+        "name": "alphabet",
+        "ordinal": 9,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -61,7 +66,8 @@
       false,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
   "hash": "1091e13fa98d72a9243adb20015a90eec7303dbc81aed6b70f447742a75e3aa5"
