@@ -93,6 +93,7 @@ struct DbPassSpec {
     prohibited_chars: String,
     version: PwVersion,
     restrictions: Restrictions,
+    alphabet: Option<String>,
 }
 
 impl fmt::Display for DbPassSpec {
@@ -119,6 +120,7 @@ async fn retrieve_current_list(conn: &mut SqliteConnection) -> Result<Vec<DbPass
                     min_count_digit: u32::try_from(record.min_count_digit)?,
                     min_count_symbol: u32::try_from(record.min_count_symbol)?,
                 },
+                alphabet: record.alphabet,
             })
         })
         .collect::<Result<Vec<_>>>()
@@ -327,7 +329,13 @@ fn get_pass(spec: DbPassSpec) -> Result<SecretString> {
             let spec = PassSpec {
                 domain: spec.domain,
                 length: spec.length,
-                alphabet: apply_prohibited_chars(V0_DEFAULT_ALPHABET, &spec.prohibited_chars),
+                alphabet: apply_prohibited_chars(
+                    spec.alphabet
+                        .as_ref()
+                        .map(String::as_str)
+                        .unwrap_or(V0_DEFAULT_ALPHABET),
+                    &spec.prohibited_chars,
+                ),
             };
             Ok(spec.gen_v0("just_another_salt", &master_pw))
         }
@@ -335,7 +343,13 @@ fn get_pass(spec: DbPassSpec) -> Result<SecretString> {
             let base_spec = PassSpec {
                 domain: spec.domain,
                 length: spec.length,
-                alphabet: apply_prohibited_chars(V2_DEFAULT_ALPHABET, &spec.prohibited_chars),
+                alphabet: apply_prohibited_chars(
+                    spec.alphabet
+                        .as_ref()
+                        .map(String::as_str)
+                        .unwrap_or(V2_DEFAULT_ALPHABET),
+                    &spec.prohibited_chars,
+                ),
             };
             const SALT: [u8; 16] = [
                 82, 67, 79, 175, 96, 126, 77, 82, 158, 82, 6, 10, 183, 123, 18, 236,
