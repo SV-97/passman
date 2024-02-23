@@ -17,6 +17,10 @@ use sqlx::{
 
 use std::{collections::HashSet, fmt, str::FromStr, time::Duration};
 
+static SMALL_ASCII_ALPHABET: &str = "abcdefghijklmnopqrstuvwxyz";
+static CAPITAL_ASCII_ALPHA: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+static ASCII_DIGITS: &str = "1234567890";
+
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 const DATABASE_URL: &str = "sqlite://passman.db";
 lazy_static! {
@@ -211,6 +215,22 @@ macro_rules! unwrap_ret {
     };
 }
 
+/// Determine if any prefix of `prefixes` with lenth at least `prefix_len` is a suffix of `s`. Return the largest such suffix
+fn any_prefix_is_suffix<'a, 'b>(
+    s: &'a str,
+    prefixes: &'b str,
+    prefix_len: usize,
+) -> Option<&'b str> {
+    (prefix_len..prefixes.len()).rev().find_map(|i| {
+        let p = &prefixes[..i];
+        if s.ends_with(p) {
+            Some(p)
+        } else {
+            None
+        }
+    })
+}
+
 async fn insert_new(conn: &mut SqliteConnection) -> Result<()> {
     let domain = unwrap_ret!(
         inquire::Text::new("What's the name of the domain you want to add?").prompt_skippable()?
@@ -245,11 +265,28 @@ async fn insert_new(conn: &mut SqliteConnection) -> Result<()> {
     })
     .prompt_skippable()?);
     let restrictions = prompt_restrictions(None)?;
+    let alphabet =
+        inquire::Text::new("What characters should be used as basic alphabet for the password?")
+            .with_placeholder(match version {
+                PwVersion::Zero => V0_DEFAULT_ALPHABET,
+                PwVersion::Two => V2_DEFAULT_ALPHABET,
+            })
+            .with_autocomplete(|input: &str| {
+                let mut suggestions = vec![];
+                for alph in [SMALL_ASCII_ALPHABET, CAPITAL_ASCII_ALPHA, ASCII_DIGITS] {
+                    if let Some(suff) = any_prefix_is_suffix(input, alph, 3) {
+                        let pre = input.strip_suffix(suff).unwrap();
+                        suggestions.push(format!("{pre}{alph}"));
+                    }
+                }
+                Ok(suggestions)
+            })
+            .prompt_skippable()?;
     let version_str = version.to_string();
     sqlx::query!(
         "
-        INSERT INTO domains (name, length, prohibited_characters, version, min_count_lowercase, min_count_uppercase, min_count_digit, min_count_symbol)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+        INSERT INTO domains (name, length, prohibited_characters, version, min_count_lowercase, min_count_uppercase, min_count_digit, min_count_symbol, alphabet)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
         ",
         domain,
         length,
@@ -259,6 +296,7 @@ async fn insert_new(conn: &mut SqliteConnection) -> Result<()> {
         restrictions.min_count_upper,
         restrictions.min_count_digit,
         restrictions.min_count_symbol,
+        alphabet,
     )
     .execute(conn)
     .await?;
@@ -602,4 +640,29 @@ async fn main() -> Result<()> {
         println!();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{any_prefix_is_suffix, SMALL_ASCII_ALPHABET};
+
+    #[test]
+    fn suffixes() {
+        assert_eq!(
+            any_prefix_is_suffix("abc", SMALL_ASCII_ALPHABET, 3),
+            Some("abc"),
+        );
+        assert_eq!(
+            any_prefix_is_suffix("abcdef", SMALL_ASCII_ALPHABET, 3),
+            Some("abcdef"),
+        );
+        assert_eq!(
+            any_prefix_is_suffix("abcdef1", SMALL_ASCII_ALPHABET, 3),
+            None,
+        );
+        assert_eq!(
+            any_prefix_is_suffix("abcdef", SMALL_ASCII_ALPHABET, 10),
+            None,
+        );
+    }
 }
