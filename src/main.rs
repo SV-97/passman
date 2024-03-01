@@ -281,7 +281,8 @@ async fn insert_new(conn: &mut SqliteConnection) -> Result<()> {
                 }
                 Ok(suggestions)
             })
-            .prompt_skippable()?;
+            .prompt_skippable()?
+            .and_then(|s| if s.is_empty() { None } else { Some(s) });
     let version_str = version.to_string();
     sqlx::query!(
         "
